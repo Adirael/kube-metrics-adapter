@@ -25,11 +25,15 @@ import (
 	"github.com/zalando-incubator/kube-metrics-adapter/pkg/server"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/component-base/logs"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func main() {
 	logs.InitLogs()
 	defer logs.FlushLogs()
+
+	log.SetLevel(log.ErrorLevel)
 
 	if len(os.Getenv("GOMAXPROCS")) == 0 {
 		runtime.GOMAXPROCS(runtime.NumCPU())
