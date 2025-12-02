@@ -31,13 +31,16 @@ type externalMetricsStoredMetric struct {
 }
 
 // MetricStore is a simple in-memory Metrics Store for HPA metrics.
+// It uses sharded locks to reduce contention when handling many concurrent requests.
 type MetricStore struct {
 	// metricName -> referencedResource -> objectNamespace -> objectName -> metric
 	customMetricsStore customMetricStore
 	// namespace -> metricName -> labels -> metric
 	externalMetricsStore externalMetricStore
 	metricsTTLCalculator func() time.Time
-	sync.RWMutex
+	// Use separate locks for custom and external metrics to reduce contention
+	customMetricsLock   sync.RWMutex
+	externalMetricsLock sync.RWMutex
 }
 
 type metricName string
@@ -76,8 +79,8 @@ func (s *MetricStore) Insert(value collector.CollectedMetric) {
 
 // insertCustomMetric inserts a custom metric plus labels into the store.
 func (s *MetricStore) insertCustomMetric(value custom_metrics.MetricValue) {
-	s.Lock()
-	defer s.Unlock()
+	s.customMetricsLock.Lock()
+	defer s.customMetricsLock.Unlock()
 
 	// TODO: handle this mapping nicer. This information should be
 	// registered as the metrics are.
@@ -193,8 +196,8 @@ func (s *MetricStore) insertCustomMetric(value custom_metrics.MetricValue) {
 
 // insertExternalMetric inserts an external metric into the store.
 func (s *MetricStore) insertExternalMetric(namespace objectNamespace, metric external_metrics.ExternalMetricValue) {
-	s.Lock()
-	defer s.Unlock()
+	s.externalMetricsLock.Lock()
+	defer s.externalMetricsLock.Unlock()
 
 	storedMetric := externalMetricsStoredMetric{
 		Value: metric,
@@ -253,11 +256,11 @@ func parseHashLabelMap(s labelsHash) labels.Set {
 
 // GetMetricsBySelector gets metric from the customMetricsStore using a label selector to
 // find metrics for matching resources.
-func (s *MetricStore) GetMetricsBySelector(_ context.Context, namespace objectNamespace, selector labels.Selector, info provider.CustomMetricInfo) *custom_metrics.MetricValueList {
-	matchedMetrics := make([]custom_metrics.MetricValue, 0)
+func (s *MetricStore) GetMetricsBySelector(ctx context.Context, namespace objectNamespace, selector labels.Selector, info provider.CustomMetricInfo) *custom_metrics.MetricValueList {
+	s.customMetricsLock.RLock()
+	defer s.customMetricsLock.RUnlock()
 
-	s.RLock()
-	defer s.RUnlock()
+	matchedMetrics := []custom_metrics.MetricValue{}
 
 	group2namespace, ok := s.customMetricsStore[metricName(info.Metric)]
 	if !ok {
@@ -297,8 +300,8 @@ func (s *MetricStore) GetMetricsByName(_ context.Context, object types.Namespace
 	name := objectName(object.Name)
 	namespace := objectNamespace(object.Namespace)
 
-	s.RLock()
-	defer s.RUnlock()
+	s.customMetricsLock.RLock()
+	defer s.customMetricsLock.RUnlock()
 
 	group2namespace, ok := s.customMetricsStore[metricName(info.Metric)]
 	if !ok {
@@ -338,8 +341,8 @@ func (s *MetricStore) GetMetricsByName(_ context.Context, object types.Namespace
 
 // ListAllMetrics lists all custom metrics in the Metrics Store.
 func (s *MetricStore) ListAllMetrics() []provider.CustomMetricInfo {
-	s.RLock()
-	defer s.RUnlock()
+	s.customMetricsLock.RLock()
+	defer s.customMetricsLock.RUnlock()
 
 	metrics := make([]provider.CustomMetricInfo, 0, len(s.customMetricsStore))
 
@@ -364,8 +367,8 @@ func (s *MetricStore) ListAllMetrics() []provider.CustomMetricInfo {
 func (s *MetricStore) GetExternalMetric(_ context.Context, namespace objectNamespace, selector labels.Selector, info provider.ExternalMetricInfo) (*external_metrics.ExternalMetricValueList, error) {
 	matchedMetrics := make([]external_metrics.ExternalMetricValue, 0)
 
-	s.RLock()
-	defer s.RUnlock()
+	s.externalMetricsLock.RLock()
+	defer s.externalMetricsLock.RUnlock()
 
 	if metrics, ok := s.externalMetricsStore[namespace]; ok {
 		if selectors, ok := metrics[metricName(info.Metric)]; ok {
@@ -382,8 +385,8 @@ func (s *MetricStore) GetExternalMetric(_ context.Context, namespace objectNames
 
 // ListAllExternalMetrics lists all external metrics in the Metrics Store.
 func (s *MetricStore) ListAllExternalMetrics() []provider.ExternalMetricInfo {
-	s.RLock()
-	defer s.RUnlock()
+	s.externalMetricsLock.RLock()
+	defer s.externalMetricsLock.RUnlock()
 
 	metricsInfo := make([]provider.ExternalMetricInfo, 0, len(s.externalMetricsStore))
 
@@ -401,8 +404,11 @@ func (s *MetricStore) ListAllExternalMetrics() []provider.ExternalMetricInfo {
 // RemoveExpired removes expired metrics from the Metrics Store. A metric is
 // considered expired if its metricsTTL is before time.Now().
 func (s *MetricStore) RemoveExpired() {
-	s.Lock()
-	defer s.Unlock()
+	// Lock both stores for cleanup
+	s.customMetricsLock.Lock()
+	defer s.customMetricsLock.Unlock()
+	s.externalMetricsLock.Lock()
+	defer s.externalMetricsLock.Unlock()
 
 	// cleanup custom metrics
 	for metricName, group2namespace := range s.customMetricsStore {

@@ -72,6 +72,8 @@ func NewCommandStartAdapterServer(stopCh <-chan struct{}) *cobra.Command {
 		CredentialsDir:                    "/meta/credentials",
 		ExternalRPSMetricName:             "skipper_serve_host_duration_seconds_count",
 		LogLevel:                          "info",
+		KubeClientQPS:                     100.0,
+		KubeClientBurst:                   200,
 	}
 
 	cmd := &cobra.Command{
@@ -157,6 +159,10 @@ func NewCommandStartAdapterServer(stopCh <-chan struct{}) *cobra.Command {
 		"whether to enable external RPS metric collector or not")
 	flags.StringVar(&o.LogLevel, "log-level", o.LogLevel, ""+
 		"log level (debug, info, warn, error, fatal, panic)")
+	flags.Float64Var(&o.KubeClientQPS, "kube-client-qps", o.KubeClientQPS, ""+
+		"maximum queries per second (QPS) to the Kubernetes API server (increase for large clusters)")
+	flags.IntVar(&o.KubeClientBurst, "kube-client-burst", o.KubeClientBurst, ""+
+		"maximum burst for throttle to the Kubernetes API server (increase for large clusters)")
 
 	return cmd
 }
@@ -212,6 +218,9 @@ func (o AdapterServerOptions) RunCustomMetricsAdapterServer(stopCh <-chan struct
 	}()
 
 	clientConfig.Timeout = defaultClientGOTimeout
+	// Set rate limiting to prevent overwhelming the API server
+	clientConfig.QPS = float32(o.KubeClientQPS)
+	clientConfig.Burst = o.KubeClientBurst
 
 	client, err := kubernetes.NewForConfig(clientConfig)
 	if err != nil {
@@ -561,4 +570,8 @@ type AdapterServerOptions struct {
 	ExternalRPSMetricName string
 	// LogLevel sets the log level (debug, info, warn, error, fatal, panic)
 	LogLevel string
+	// KubeClientQPS configures the maximum QPS to the Kubernetes API server
+	KubeClientQPS float64
+	// KubeClientBurst configures the maximum burst for throttle to the Kubernetes API server
+	KubeClientBurst int
 }

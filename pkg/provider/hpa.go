@@ -78,7 +78,9 @@ type metricCollection struct {
 
 // NewHPAProvider initializes a new HPAProvider.
 func NewHPAProvider(client kubernetes.Interface, interval, collectorInterval time.Duration, collectorFactory *collector.CollectorFactory, disregardIncompatibleHPAs bool, metricsTTL time.Duration, gcInterval time.Duration) *HPAProvider {
-	metricsc := make(chan metricCollection)
+	// Use a buffered channel to prevent collectors from blocking when writing metrics
+	// Buffer size of 1000 allows handling bursts from many concurrent collectors
+	metricsc := make(chan metricCollection, 1000)
 
 	return &HPAProvider{
 		client:            client,
