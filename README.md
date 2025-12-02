@@ -243,6 +243,10 @@ metadata:
     # If specified, then this prometheus server is used,
     # instead of the prometheus server specified as the CLI argument `--prometheus-server`.
     metric-config.external.processed-events-per-second.prometheus/prometheus-server: http://prometheus.my-namespace.svc
+    # This annotation is optional.
+    # If specified, this will use one of the additional prometheus servers configured via the
+    # --additional-prometheus-server <name>=<url>,<name>=<url>,... CLI argument.
+    metric-config.external.processed-events-per-second.prometheus/prometheus-server-alias: external-prometheus
     # metric-config.<metricType>.<metricName>.<collectorType>/<configKey>
     metric-config.external.processed-events-per-second.prometheus/query: |
       scalar(sum(rate(event-service_events_count{application="event-service",processed="true"}[1m])))
@@ -751,12 +755,12 @@ spec:
   - type: External
     external:
       metric:
-          name: my-nakadi-consumer
-          selector:
-            matchLabels:
-              type: nakadi
-              subscription-id: "708095f6-cece-4d02-840e-ee488d710b29"
-              metric-type: "consumer-lag-seconds|unconsumed-events"
+        name: my-nakadi-consumer
+        selector:
+          matchLabels:
+            type: nakadi
+            subscription-id: "708095f6-cece-4d02-840e-ee488d710b29"
+            metric-type: "consumer-lag-seconds|unconsumed-events"
       target:
         # value is compatible with the consumer-lag-seconds metric type.
         # It describes the amount of consumer lag in seconds before scaling
@@ -805,6 +809,27 @@ with more consumers.
 For this case you should also account for the average time for processing an
 event when defining the target.
 
+Alternative to defining `subscription-id` you can also filter based on
+`owning_application`, `event-types` and `consumer-group`:
+
+```yaml
+metrics:
+- type: External
+  external:
+    metric:
+      name: my-nakadi-consumer
+      selector:
+        matchLabels:
+          type: nakadi
+          owning-application: "example-app"
+          # comma separated list of event types
+          event-types: "example-event-type,example-event-type2"
+          consumer-group: "abcd1234"
+          metric-type: "consumer-lag-seconds|unconsumed-events"
+```
+
+This is useful in dynamic environments where the subscription ID might not be
+known before deployment time (e.g. because it's created by the same deployment).
 
 ## HTTP Collector
 

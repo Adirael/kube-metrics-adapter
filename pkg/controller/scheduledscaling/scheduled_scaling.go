@@ -1,6 +1,7 @@
 package scheduledscaling
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -10,7 +11,6 @@ import (
 	v1 "github.com/zalando-incubator/kube-metrics-adapter/pkg/apis/zalando.org/v1"
 	zalandov1 "github.com/zalando-incubator/kube-metrics-adapter/pkg/client/clientset/versioned/typed/zalando.org/v1"
 	"github.com/zalando-incubator/kube-metrics-adapter/pkg/recorder"
-	"golang.org/x/net/context"
 	"golang.org/x/sync/errgroup"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -57,7 +57,7 @@ var (
 type now func() time.Time
 
 type scalingScheduleStore interface {
-	List() []interface{}
+	List() []any
 }
 
 type Controller struct {
@@ -325,7 +325,7 @@ func highestActiveSchedule(hpa *autoscalingv2.HorizontalPodAutoscaler, activeSch
 			continue
 		}
 
-		target := int64(metric.Object.Target.AverageValue.MilliValue() / 1000)
+		target := float64(metric.Object.Target.AverageValue.MilliValue()) / 1000.0
 		if target == 0 {
 			continue
 		}
@@ -338,10 +338,10 @@ func highestActiveSchedule(hpa *autoscalingv2.HorizontalPodAutoscaler, activeSch
 			value = activeSchedules[scheduleName]
 		}
 
-		expected := int64(math.Ceil(float64(value) / float64(target)))
+		expected := int64(math.Ceil(float64(value) / target))
 		if expected > highestExpected {
 			highestExpected = expected
-			usageRatio = float64(value) / (float64(target) * float64(currentReplicas))
+			usageRatio = float64(value) / (target * float64(currentReplicas))
 			highestObject = metric.Object.DescribedObject
 		}
 	}

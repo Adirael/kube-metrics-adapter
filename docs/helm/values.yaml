@@ -3,8 +3,8 @@ namespace: kube-system
 replicas: 1
 
 registry:
-  image: registry.opensource.zalan.do/teapot/kube-metrics-adapter
-  imageTag: v0.2.3
+  image: ghcr.io/zalando-incubator/kube-metrics-adapter
+  imageTag: v0.2.6
   imagePullPolicy: IfNotPresent
 
 service:
@@ -63,6 +63,9 @@ log:
 
 prometheus:
   server: http://prometheus.kube-system.svc.cluster.local
+  serverTokenFile:
+  additionalServers: {}
+  additionalServerTokenFiles: {}
   metricsAddress:
 
 requestHeader:
@@ -109,3 +112,7 @@ priorityClassName: ""
 podAnnotations: {}
 
 serviceAccountAnnotations: {}
+
+volumes: []
+
+volumeMounts: []

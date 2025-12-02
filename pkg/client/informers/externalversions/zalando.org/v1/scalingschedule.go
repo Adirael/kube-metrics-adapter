@@ -19,13 +19,13 @@ limitations under the License.
 package v1
 
 import (
-	"context"
+	context "context"
 	time "time"
 
-	zalandoorgv1 "github.com/zalando-incubator/kube-metrics-adapter/pkg/apis/zalando.org/v1"
+	apiszalandoorgv1 "github.com/zalando-incubator/kube-metrics-adapter/pkg/apis/zalando.org/v1"
 	versioned "github.com/zalando-incubator/kube-metrics-adapter/pkg/client/clientset/versioned"
 	internalinterfaces "github.com/zalando-incubator/kube-metrics-adapter/pkg/client/informers/externalversions/internalinterfaces"
-	v1 "github.com/zalando-incubator/kube-metrics-adapter/pkg/client/listers/zalando.org/v1"
+	zalandoorgv1 "github.com/zalando-incubator/kube-metrics-adapter/pkg/client/listers/zalando.org/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -36,7 +36,7 @@ import (
 // ScalingSchedules.
 type ScalingScheduleInformer interface {
 	Informer() cache.SharedIndexInformer
-	Lister() v1.ScalingScheduleLister
+	Lister() zalandoorgv1.ScalingScheduleLister
 }
 
 type scalingScheduleInformer struct {
@@ -62,16 +62,28 @@ func NewFilteredScalingScheduleInformer(client versioned.Interface, namespace st
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ZalandoV1().ScalingSchedules(namespace).List(context.TODO(), options)
+				return client.ZalandoV1().ScalingSchedules(namespace).List(context.Background(), options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ZalandoV1().ScalingSchedules(namespace).Watch(context.TODO(), options)
+				return client.ZalandoV1().ScalingSchedules(namespace).Watch(context.Background(), options)
+			},
+			ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+				if tweakListOptions != nil {
+					tweakListOptions(&options)
+				}
+				return client.ZalandoV1().ScalingSchedules(namespace).List(ctx, options)
+			},
+			WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+				if tweakListOptions != nil {
+					tweakListOptions(&options)
+				}
+				return client.ZalandoV1().ScalingSchedules(namespace).Watch(ctx, options)
 			},
 		},
-		&zalandoorgv1.ScalingSchedule{},
+		&apiszalandoorgv1.ScalingSchedule{},
 		resyncPeriod,
 		indexers,
 	)
@@ -82,9 +94,9 @@ func (f *scalingScheduleInformer) defaultInformer(client versioned.Interface, re
 }
 
 func (f *scalingScheduleInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&zalandoorgv1.ScalingSchedule{}, f.defaultInformer)
+	return f.factory.InformerFor(&apiszalandoorgv1.ScalingSchedule{}, f.defaultInformer)
 }
 
-func (f *scalingScheduleInformer) Lister() v1.ScalingScheduleLister {
-	return v1.NewScalingScheduleLister(f.Informer().GetIndexer())
+func (f *scalingScheduleInformer) Lister() zalandoorgv1.ScalingScheduleLister {
+	return zalandoorgv1.NewScalingScheduleLister(f.Informer().GetIndexer())
 }
