@@ -50,6 +50,22 @@ var (
 		Name: "kube_metrics_adapter_updates_error",
 		Help: "The total number of failed HPA update attempts",
 	})
+	// APIRequests tracks incoming requests from the API server by metric type and operation
+	APIRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "kube_metrics_adapter_api_requests_total",
+		Help: "Total number of API requests received from the Kubernetes API server",
+	}, []string{"type", "operation"})
+	// APIRequestDuration tracks the latency of API requests
+	APIRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "kube_metrics_adapter_api_request_duration_seconds",
+		Help:    "Histogram of API request durations from the Kubernetes API server",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"type", "operation"})
+	// APIRequestErrors tracks API request errors
+	APIRequestErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "kube_metrics_adapter_api_request_errors_total",
+		Help: "Total number of API request errors",
+	}, []string{"type", "operation"})
 )
 
 // HPAProvider is a base provider for initializing metric collectors based on
@@ -306,8 +322,15 @@ func (p *HPAProvider) collectMetrics(ctx context.Context) {
 
 // GetMetricByName gets a single metric by name.
 func (p *HPAProvider) GetMetricByName(ctx context.Context, name types.NamespacedName, info provider.CustomMetricInfo, metricSelector labels.Selector) (*custom_metrics.MetricValue, error) {
+	start := time.Now()
+	APIRequests.WithLabelValues("custom", "get_by_name").Inc()
+	defer func() {
+		APIRequestDuration.WithLabelValues("custom", "get_by_name").Observe(time.Since(start).Seconds())
+	}()
+
 	metric := p.metricStore.GetMetricsByName(ctx, name, info, metricSelector)
 	if metric == nil {
+		APIRequestErrors.WithLabelValues("custom", "get_by_name").Inc()
 		return nil, provider.NewMetricNotFoundForError(info.GroupResource, info.Metric, name.Name)
 	}
 	return metric, nil
@@ -316,19 +339,47 @@ func (p *HPAProvider) GetMetricByName(ctx context.Context, name types.Namespaced
 // GetMetricBySelector returns metrics for namespaced resources by
 // label selector.
 func (p *HPAProvider) GetMetricBySelector(ctx context.Context, namespace string, selector labels.Selector, info provider.CustomMetricInfo, metricSelector labels.Selector) (*custom_metrics.MetricValueList, error) {
+	start := time.Now()
+	APIRequests.WithLabelValues("custom", "get_by_selector").Inc()
+	defer func() {
+		APIRequestDuration.WithLabelValues("custom", "get_by_selector").Observe(time.Since(start).Seconds())
+	}()
+
 	return p.metricStore.GetMetricsBySelector(ctx, objectNamespace(namespace), selector, info), nil
 }
 
 // ListAllMetrics list all available metrics from the provicer.
 func (p *HPAProvider) ListAllMetrics() []provider.CustomMetricInfo {
+	start := time.Now()
+	APIRequests.WithLabelValues("custom", "list").Inc()
+	defer func() {
+		APIRequestDuration.WithLabelValues("custom", "list").Observe(time.Since(start).Seconds())
+	}()
+
 	return p.metricStore.ListAllMetrics()
 }
 
 func (p *HPAProvider) GetExternalMetric(ctx context.Context, namespace string, metricSelector labels.Selector, info provider.ExternalMetricInfo) (*external_metrics.ExternalMetricValueList, error) {
-	return p.metricStore.GetExternalMetric(ctx, objectNamespace(namespace), metricSelector, info)
+	start := time.Now()
+	APIRequests.WithLabelValues("external", "get").Inc()
+	defer func() {
+		APIRequestDuration.WithLabelValues("external", "get").Observe(time.Since(start).Seconds())
+	}()
+
+	result, err := p.metricStore.GetExternalMetric(ctx, objectNamespace(namespace), metricSelector, info)
+	if err != nil {
+		APIRequestErrors.WithLabelValues("external", "get").Inc()
+	}
+	return result, err
 }
 
 func (p *HPAProvider) ListAllExternalMetrics() []provider.ExternalMetricInfo {
+	start := time.Now()
+	APIRequests.WithLabelValues("external", "list").Inc()
+	defer func() {
+		APIRequestDuration.WithLabelValues("external", "list").Observe(time.Since(start).Seconds())
+	}()
+
 	return p.metricStore.ListAllExternalMetrics()
 }
 
