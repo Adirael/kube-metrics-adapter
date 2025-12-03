@@ -18,6 +18,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -436,7 +438,106 @@ func (o AdapterServerOptions) RunCustomMetricsAdapterServer(stopCh <-chan struct
 	if err != nil {
 		return err
 	}
+
+	// Add request logging middleware by wrapping the FullHandlerChain
+	originalHandler := server.GenericAPIServer.Handler.FullHandlerChain
+	server.GenericAPIServer.Handler.FullHandlerChain = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Generate unique request ID
+		requestID := generateRequestID()
+		start := time.Now()
+
+		// Check if connection was closed or has issues before processing
+		if r.Context().Err() != nil {
+			log.WithFields(log.Fields{
+				"request_id": requestID,
+				"method":     r.Method,
+				"path":       r.URL.Path,
+				"remote":     r.RemoteAddr,
+				"error":      r.Context().Err(),
+			}).Warn("API request context already cancelled before processing")
+		}
+
+		log.WithFields(log.Fields{
+			"request_id": requestID,
+			"method":     r.Method,
+			"path":       r.URL.Path,
+			"remote":     r.RemoteAddr,
+			"user_agent": r.UserAgent(),
+		}).Debug("API request started")
+
+		// Wrap the ResponseWriter to capture status code
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		// Add panic recovery to catch any panics in the handler chain
+		defer func() {
+			if rec := recover(); rec != nil {
+				duration := time.Since(start)
+				log.WithFields(log.Fields{
+					"request_id":  requestID,
+					"method":      r.Method,
+					"path":        r.URL.Path,
+					"remote":      r.RemoteAddr,
+					"duration_ms": duration.Milliseconds(),
+					"panic":       rec,
+				}).Error("API request panicked")
+				panic(rec) // Re-panic after logging
+			}
+		}()
+
+		// Serve the request
+		originalHandler.ServeHTTP(wrapped, r)
+
+		duration := time.Since(start)
+		logFields := log.Fields{
+			"request_id":  requestID,
+			"method":      r.Method,
+			"path":        r.URL.Path,
+			"remote":      r.RemoteAddr,
+			"status":      wrapped.statusCode,
+			"duration_ms": duration.Milliseconds(),
+		}
+
+		// Check if the connection was closed during processing
+		if r.Context().Err() != nil {
+			logFields["context_error"] = r.Context().Err().Error()
+			log.WithFields(logFields).Error("API request context cancelled during processing - connection may have been severed")
+			return
+		}
+
+		// Log based on status and duration
+		if wrapped.statusCode >= 500 {
+			log.WithFields(logFields).Error("API request failed with server error")
+		} else if wrapped.statusCode >= 400 {
+			log.WithFields(logFields).Warn("API request failed with client error")
+		} else if duration > 5*time.Second {
+			log.WithFields(logFields).Warn("Slow API request detected")
+		} else {
+			log.WithFields(logFields).Info("API request completed")
+		}
+	})
+
 	return server.GenericAPIServer.PrepareRun().RunWithContext(ctx)
+}
+
+// generateRequestID generates a random 8-character request ID
+func generateRequestID() string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID if random generation fails
+		return fmt.Sprintf("%08x", time.Now().UnixNano()&0xffffffff)
+	}
+	return hex.EncodeToString(b)
+}
+
+// responseWriter wraps http.ResponseWriter to capture the status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
 }
 
 // newInstrumentedOauth2HTTPClient creates an HTTP client with automatic oauth2
